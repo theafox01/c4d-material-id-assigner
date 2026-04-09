@@ -6,50 +6,47 @@ Purpose:
     Assigns a numeric Material ID to all materials currently selected
     in the Material Manager.
 
-    Strategy (in order of priority):
-    1. maxon Node Graph API  — sets the native port on the Output node
-       (Redshift RS Standard "OPTIONS > Material ID", R2024+ node materials)
-    2. Classic description search  — fallback for non-node materials
-    3. User Data  — last resort fallback
+    Sets the native Redshift Output node port:
+    com.redshift3d.redshift4c4d.node.output.materialid
+
+Workflow:
+    1. Select one or more materials in the C4D Material Manager
+    2. Run the plugin via Extensions menu
+    3. Enter the desired ID number in the dialog
+    4. Confirm with OK
 
 Author:    theafox01
-Version:   1.2
+Version:   1.3
 Requires:  Cinema 4D R2026 + Redshift
 
 Plugin ID: 1060500  (PLACEHOLDER — register at developers.maxon.net)
 
 Changelog:
-    1.2 - Rewrote core to use maxon Node Graph API for node-based materials
-          (Redshift RS Standard / Output node Material ID port)
+    1.3 - Hardcoded correct Redshift space ID and port ID (found via diagnostics)
+          Space:  com.redshift3d.redshift4c4d.class.nodespace
+          Port:   com.redshift3d.redshift4c4d.node.output.materialid
+          Fixed:  GetRoot() → GetViewRoot() (deprecated since 2025.0)
+          Fixed:  NODE_KIND.PORT → NODE_KIND.INPORT
+    1.2 - Rewrote core to use maxon Node Graph API
     1.1 - Search native renderer Material ID parameter via description
     1.0 - Initial release (User Data only)
 """
 
 import c4d
 from c4d import gui
-
 import maxon
 
 # ---------------------------------------------------------------------------
-# Config
+# Plugin metadata
 # ---------------------------------------------------------------------------
 PLUGIN_ID      = 1060500
 PLUGIN_NAME    = "Material ID Assigner"
 PLUGIN_HELP    = "Assigns a numeric Material ID to all selected materials"
-PLUGIN_VERSION = "1.2"
+PLUGIN_VERSION = "1.3"
 
-# Set to True to print all found nodes/ports to the C4D console (for debugging)
-DEBUG = False
-
-# Renderer graph space IDs to try (in order)
-RENDERER_SPACES = [
-    "com.redshift3d.redshift4c4d",   # Redshift
-    "com.autodesk.arnold.shader",    # Arnold
-    "net.maxon.render.0",            # C4D Standard / Physical
-]
-
-# Port name fragments to look for (case-insensitive substring match)
-MATID_PORT_FRAGMENTS = ["material_id", "materialid", "matid"]
+# Redshift node graph constants (verified in C4D R2026)
+RS_SPACE_ID  = "com.redshift3d.redshift4c4d.class.nodespace"
+RS_PORT_ID   = "com.redshift3d.redshift4c4d.node.output.materialid"
 
 # Fallback User Data field name
 USERDATA_FIELD_NAME = "Material ID"
@@ -66,98 +63,51 @@ ID_BTN_CANCEL    = 1006
 
 
 # ---------------------------------------------------------------------------
-# Core: Node Graph API (maxon)
+# Core: Redshift Node Graph
 # ---------------------------------------------------------------------------
 
-def try_set_via_node_graph(mat, value):
+def set_rs_material_id(mat, value):
     """
-    Searches the material's node graph for a port matching one of the
-    MATID_PORT_FRAGMENTS and sets its default value.
+    Sets the Material ID on the Redshift Output node of a node-based material.
+    Port: com.redshift3d.redshift4c4d.node.output.materialid
 
-    Returns True if the value was successfully set.
+    Returns True on success, False if the material has no Redshift node graph.
     """
     try:
         nm = mat.GetNodeMaterialReference()
-        if not nm:
+        if nm is None:
             return False
 
-        for spaceStr in RENDERER_SPACES:
-            try:
-                graph = nm.GetGraph(maxon.Id(spaceStr))
-            except Exception:
-                continue
+        graph = nm.GetGraph(maxon.Id(RS_SPACE_ID))
+        if graph.IsNullValue():
+            return False
 
-            if graph.IsNullValue():
-                continue
+        found = [False]
 
-            if DEBUG:
-                print(f"[MatIDAssigner] Found graph: {spaceStr}")
+        with maxon.GraphTransaction(graph) as ta:
+            nodes = []
+            graph.GetViewRoot().GetChildren(nodes, maxon.NODE_KIND.NODE)
 
-            found = [False]
+            for node in nodes:
+                ports = []
+                node.GetInputs().GetChildren(ports, maxon.NODE_KIND.INPORT)
 
-            with maxon.GraphTransaction(graph) as ta:
+                for port in ports:
+                    if str(port.GetId()) == RS_PORT_ID:
+                        port.SetDefaultValue(maxon.Int32(value))
+                        found[0] = True
+                        break
 
-                # Collect all nodes
-                nodes = []
-                graph.GetRoot().GetChildren(nodes, maxon.NODE_KIND.NODE)
+                if found[0]:
+                    break
 
-                for node in nodes:
-                    nodeIdStr = str(node.GetId()).lower()
+            ta.Commit()
 
-                    if DEBUG:
-                        print(f"[MatIDAssigner]   Node: {nodeIdStr}")
-
-                    # Collect all input ports of this node
-                    ports = []
-                    node.GetInputs().GetChildren(ports, maxon.NODE_KIND.PORT)
-
-                    for port in ports:
-                        portIdStr = str(port.GetId()).lower()
-
-                        if DEBUG:
-                            print(f"[MatIDAssigner]     Port: {portIdStr}")
-
-                        if any(frag in portIdStr for frag in MATID_PORT_FRAGMENTS):
-                            port.SetDefaultValue(maxon.Int32(value))
-                            found[0] = True
-                            if DEBUG:
-                                print(f"[MatIDAssigner] ✓ Set '{portIdStr}' = {value}")
-
-                ta.Commit()
-
-            if found[0]:
-                return True
-
-        return False
+        return found[0]
 
     except Exception as e:
-        print(f"[MatIDAssigner] Node graph error: {e}")
+        print(f"[MatIDAssigner] Error: {e}")
         return False
-
-
-# ---------------------------------------------------------------------------
-# Fallback: Classic description search
-# ---------------------------------------------------------------------------
-
-def try_set_via_description(mat, value):
-    """
-    Searches the material's classic C4D description for a parameter
-    named 'material id' and sets it. Works for non-node legacy materials.
-    """
-    try:
-        desc = mat.GetDescription(0)
-        for bc, paramid, groupid in desc:
-            if bc is None:
-                continue
-            name = bc.GetString(c4d.DESC_NAME)
-            if name and "material id" in name.strip().lower():
-                mat[paramid] = value
-                if DEBUG:
-                    print(f"[MatIDAssigner] ✓ Set via description: '{name}' = {value}")
-                return True
-    except Exception as e:
-        print(f"[MatIDAssigner] Description search error: {e}")
-    return False
 
 
 # ---------------------------------------------------------------------------
@@ -165,22 +115,19 @@ def try_set_via_description(mat, value):
 # ---------------------------------------------------------------------------
 
 def set_via_userdata(mat, value):
-    """
-    Writes value to a 'Material ID' User Data field on the material.
-    Creates the field if it doesn't exist yet.
-    """
+    """Writes value to a 'Material ID' User Data field. Creates it if needed."""
     for uid, bc in mat.GetUserDataContainer():
         if bc[c4d.DESC_NAME] == USERDATA_FIELD_NAME:
             mat[uid] = value
             return
-    # Create new field
+
     bc = c4d.GetCustomDatatypeDefault(c4d.DTYPE_LONG)
-    bc[c4d.DESC_NAME]    = USERDATA_FIELD_NAME
+    bc[c4d.DESC_NAME]       = USERDATA_FIELD_NAME
     bc[c4d.DESC_SHORT_NAME] = "Mat ID"
-    bc[c4d.DESC_MIN]     = 0
-    bc[c4d.DESC_MAX]     = 99999
-    bc[c4d.DESC_STEP]    = 1
-    bc[c4d.DESC_ANIMATE] = c4d.DESC_ANIMATE_OFF
+    bc[c4d.DESC_MIN]        = 0
+    bc[c4d.DESC_MAX]        = 99999
+    bc[c4d.DESC_STEP]       = 1
+    bc[c4d.DESC_ANIMATE]    = c4d.DESC_ANIMATE_OFF
     uid = mat.AddUserData(bc)
     mat[uid] = value
 
@@ -200,12 +147,12 @@ def get_selected_materials(doc):
 
 
 # ---------------------------------------------------------------------------
-# Main assignment logic
+# Main assignment
 # ---------------------------------------------------------------------------
 
 def assign_id_to_selected_materials(material_id):
     """
-    Assigns material_id to all selected materials using the best available method.
+    Assigns material_id to all selected materials.
     Returns (total, native_count, fallback_count).
     """
     doc = c4d.documents.GetActiveDocument()
@@ -224,18 +171,8 @@ def assign_id_to_selected_materials(material_id):
     for mat in materials:
         doc.AddUndo(c4d.UNDOTYPE_CHANGE, mat)
 
-        if DEBUG:
-            print(f"\n[MatIDAssigner] Processing: {mat.GetName()}")
-
-        # Priority 1: Node graph
-        if try_set_via_node_graph(mat, material_id):
+        if set_rs_material_id(mat, material_id):
             native_count += 1
-
-        # Priority 2: Classic description
-        elif try_set_via_description(mat, material_id):
-            native_count += 1
-
-        # Priority 3: User Data fallback
         else:
             set_via_userdata(mat, material_id)
             fallback_count += 1
@@ -296,14 +233,14 @@ class MaterialIDDialog(gui.GeDialog):
                 )
             elif fallback > 0 and native == 0:
                 gui.MessageDialog(
-                    f"Material ID {entered_id} wurde gesetzt ({total} Material(ien)).\n\n"
-                    f"Hinweis: Kein nativer Parameter gefunden — ID als User Data gespeichert.\n"
-                    f"→ Aktiviere DEBUG=True im Plugin-Code für Details."
+                    f"Material ID {entered_id} gesetzt ({total} Material(ien)).\n\n"
+                    f"Hinweis: Kein Redshift Output-Node gefunden.\n"
+                    f"ID wurde als User Data gespeichert."
                 )
             else:
                 gui.MessageDialog(
                     f"Material ID {entered_id} erfolgreich\n"
-                    f"{total} Material(ien) zugewiesen. ✓"
+                    f"{total} Material(ien) zugewiesen."
                 )
 
         elif id == ID_BTN_CANCEL:
