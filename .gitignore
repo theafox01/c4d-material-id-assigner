@@ -1,0 +1,22 @@
+# Cinema 4D
+*.c4d
+*.c4d.bak
+*.lib4d
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
