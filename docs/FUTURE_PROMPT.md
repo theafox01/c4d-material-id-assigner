@@ -1,56 +1,59 @@
 # Future Session Prompt — Material ID Assigner
 
-Use this prompt at the start of a new Claude session to quickly brief the AI:
+Use this prompt at the start of a new Claude session to quickly get up to speed:
 
 ---
 
 ## Prompt Template
 
 ```
-Du arbeitest an einem Cinema 4D Python Plugin namens "Material ID Assigner".
+Du arbeitest an einem Cinema 4D Python Plugin: "Material ID Assigner".
 
-Das Plugin befindet sich im Repository: https://github.com/theafox01/c4d-material-id-assigner
+Repository: https://github.com/theafox01/c4d-material-id-assigner
+Lokaler Pfad: F:\work\My_Plugins&Tools\Cinema 4D\10_C4D_Set selekted Materials Maeteria ID\
+Plugin-Pfad: F:\Plugins\C4D\R2026\Used\MaterialIDAssigner\MaterialIDAssigner.pyp
 
-Lies zuerst CLAUDE.md für die vollständige technische Dokumentation.
+Lies zuerst CLAUDE.md — dort sind alle Lessons Learned dokumentiert.
 
-Kurzbeschreibung des Plugins:
-- Typ: Cinema 4D Command Plugin (CommandPlugin)
-- Entry Point: plugin/MaterialIDAssigner/MaterialIDAssigner.pyp
-- Funktion: Weist allen aktuell selektierten Materialien im Material Manager 
-  eine numerische "Material ID" zu, die als User Data auf dem Material gespeichert wird.
-- Workflow: Materialien selektieren → Plugin aufrufen → ID eingeben → OK → fertig
-- Die Operation ist per Ctrl+Z rückgängig machbar
+KURZBESCHREIBUNG:
+Command Plugin das allen selektierten Materialien im Material Manager
+eine numerische "Material ID" zuweist. Schreibt direkt in den nativen
+Redshift Output-Node Port. Fully working seit v1.4.
 
-Architektur (3 Layer):
-1. Hilfsfunktionen: get_selected_materials(), get_or_create_matid_userdata(), assign_id_to_selected_materials()
-2. Dialog: MaterialIDDialog (GeDialog, modal)
-3. Plugin-Klasse: MaterialIDAssignerPlugin (CommandPlugin)
+ARCHITEKTUR:
+- set_rs_material_id(mat, value)     → schreibt in RS Node Graph
+- set_via_userdata(mat, value)       → Fallback
+- assign_id_to_selected_materials()  → Haupt-Loop mit Undo
+- MaterialIDDialog(GeDialog)         → Modaler Dialog
+- MaterialIDAssignerPlugin(CommandData) → Entry Point
 
-Wichtige Infos:
-- Plugin ID 1060500 ist ein Platzhalter → vor Veröffentlichung bei developers.maxon.net registrieren
-- Anforderung: Cinema 4D R21+ (Python 3)
-- Storage: User Data Feld "Material ID" (DTYPE_LONG) direkt am Material-Objekt
+KRITISCHE API-FAKTEN FÜR R2026 (alle getestet):
+✅ Space ID:   "com.redshift3d.redshift4c4d.class.nodespace"
+✅ Port ID:    "com.redshift3d.redshift4c4d.node.output.materialid"
+✅ graph.GetViewRoot()              (nicht GetRoot — deprecated)
+✅ maxon.NODE_KIND.INPORT           (nicht PORT — existiert nicht)
+✅ graph.BeginTransaction()         (nicht maxon.GraphTransaction(graph) — TypeError)
+✅ port.SetDefaultValue(int(value)) (nicht maxon.Int32 — type mismatch)
+✅ c4d.plugins.CommandData          (nicht CommandPlugin — in R2026 entfernt)
 
-Meine aktuelle Aufgabe: [HIER EINTRAGEN WAS DU MACHEN MÖCHTEST]
+MEINE AUFGABE: [HIER EINTRAGEN]
 ```
 
 ---
 
-## Checkliste vor Änderungen
+## Diagnose-Tools
 
-- [ ] `CLAUDE.md` gelesen
-- [ ] Aktuellen Code in `MaterialIDAssigner.pyp` gelesen
-- [ ] Verständnis der 3-Layer-Architektur bestätigt
-- [ ] Plugin-ID-Hinweis beachtet (noch Platzhalter)
+Falls API-Probleme auftreten: `docs/debug_material_inspector.py` im
+**Script Manager** (Copy-Paste, nicht als Datei öffnen!) ausführen.
+Das Script gibt alle Nodes, Ports und Werte des selektierten Materials aus.
 
 ---
 
 ## Typische Erweiterungsaufgaben
 
-| Aufgabe | Stichworte für den Prompt |
-|---------|--------------------------|
-| Bulk-ID-Zuweisung (Start + Inkrement) | "Füge ein zweites Feld 'Inkrement' hinzu" |
-| CSV-Export aller Material-IDs | "Exportiere alle Materialien + IDs als CSV" |
-| Letzte ID zwischen Sessions merken | "World Container persistent speichern" |
-| Materialien nach ID filtern/auswählen | "Neue CommandPlugin zum Selektieren nach ID" |
-| Xpresso-Zugriff dokumentieren | "Zeige wie man die User Data in Xpresso liest" |
+| Aufgabe | Hinweis |
+|---------|---------|
+| Anderen Renderer unterstützen | Space ID via `nm.GetAllNimbusRefs()` ermitteln |
+| Bulk-ID mit Inkrement | Zweites Feld im Dialog + Index * Inkrement |
+| ID persistent speichern | `c4d.GetWorldContainerInstance()[ID]` |
+| ID zurücklesen | `port.GetPortValue()` (neu seit 2024.4) |

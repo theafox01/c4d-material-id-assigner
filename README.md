@@ -1,7 +1,7 @@
 # Material ID Assigner — Cinema 4D Plugin
 
 Assigns a numeric **Material ID** to all currently selected materials in the Cinema 4D Material Manager.  
-The ID is stored as a **User Data field** on each material, making it accessible in scripts, expressions, and external pipelines.
+The ID is written directly to the native **Redshift Output node** (`OPTIONS > Material ID`).
 
 ---
 
@@ -24,27 +24,36 @@ The ID is stored as a **User Data field** on each material, making it accessible
    | Windows  | `C:\Users\<User>\AppData\Roaming\Maxon\<C4D version>\plugins\` |
    | macOS    | `~/Library/Preferences/Maxon/<C4D version>/plugins/` |
 
+   **Important:** Copy only the inner `MaterialIDAssigner/` folder — not the outer `plugin/` wrapper.
+
 2. Restart Cinema 4D
 3. The plugin appears under **Extensions → Material ID Assigner**
 
 ---
 
-## Where is the ID stored?
+## Requirements
 
-The ID is saved as **User Data** on the material object:
-- Field name: `Material ID`
-- Type: Integer (Long), range 0–99 999
-- Not animatable
-
-You can read it back in Xpresso, Python scripts, or via any tool that accesses material User Data.
+| Requirement | Version |
+|-------------|---------|
+| Cinema 4D   | R2026 or later |
+| Redshift    | Any version with node-based RS Standard material |
+| Python      | 3.x (included with C4D R2026) |
 
 ---
 
-## Requirements
+## What gets changed
 
-- Cinema 4D **R21** or later (Python 3 runtime)
-- Works with Standard, Physical, Arnold, Redshift, Octane, and any other renderer  
-  (the ID is stored on the material object, renderer-independent)
+The plugin sets the **Material ID** parameter on the **Redshift Output node**:
+
+```
+Output Node → OPTIONS → Material ID
+```
+
+This is the same field visible in the Redshift Node Editor when the Output node is selected.
+It is used in Redshift for Cryptomatte, AOV masking and multi-pass compositing workflows.
+
+If no Redshift node graph is found on a material, the ID is stored as **User Data** instead
+(fallback for non-node or non-Redshift materials).
 
 ---
 
@@ -58,6 +67,10 @@ Before distributing this plugin, register a unique ID at:
 
 ## Version History
 
-| Version | Date       | Notes            |
-|---------|------------|------------------|
-| 1.0     | 2026-04-09 | Initial release  |
+| Version | Notes |
+|---------|-------|
+| 1.4 | First fully working release. Correct transaction API (`graph.BeginTransaction()`). |
+| 1.3 | Found correct Redshift space + port IDs via diagnostic scripts. |
+| 1.2 | Switched to maxon Node Graph API. |
+| 1.1 | Attempted description-based parameter search. |
+| 1.0 | Initial release — User Data only. |

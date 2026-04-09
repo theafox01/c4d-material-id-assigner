@@ -16,21 +16,35 @@ Workflow:
     4. Confirm with OK
 
 Author:    theafox01
-Version:   1.3
+Version:   1.4  (first fully working release)
 Requires:  Cinema 4D R2026 + Redshift
 
 Plugin ID: 1060500  (PLACEHOLDER — register at developers.maxon.net)
 
+--- Verified working API for C4D R2026 + Redshift ---
+
+Redshift Node Graph Space ID:
+    com.redshift3d.redshift4c4d.class.nodespace
+    (NOT "com.redshift3d.redshift4c4d" — that gives "Invalid Space" in R2026)
+
+Material ID Port ID on the RS Output node:
+    com.redshift3d.redshift4c4d.node.output.materialid
+
+Key API rules for C4D R2026 node graph (Python):
+    - graph.GetViewRoot()           not GetRoot() (deprecated since 2025.0)
+    - maxon.NODE_KIND.INPORT        not NODE_KIND.PORT (doesn't exist)
+    - graph.BeginTransaction()      not maxon.GraphTransaction(graph)
+                                    (GraphTransaction constructor fails with TypeError in R2026)
+    - port.SetDefaultValue(int(v))  use plain Python int, not maxon.Int32()
+    - c4d.plugins.CommandData       not plugins.CommandPlugin (removed in R2026)
+
 Changelog:
-    1.3 - Hardcoded correct Redshift space ID and port ID (found via diagnostics)
-          Space:  com.redshift3d.redshift4c4d.class.nodespace
-          Port:   com.redshift3d.redshift4c4d.node.output.materialid
-          Fixed:  GetRoot() → GetViewRoot() (deprecated since 2025.0)
-          Fixed:  NODE_KIND.PORT → NODE_KIND.INPORT
-          Fixed:  SetDefaultValue() in GraphTransaction caused crash
-                  → now uses GetDescIDForNodePort() + mat[descId] (crash-safe)
+    1.4 - WORKING: graph.BeginTransaction() fixes the transaction TypeError
+          All verified API constants and methods documented above.
+    1.3 - Used GetDescIDForNodePort() — failed with empty exception
+    1.3 - Used maxon.GraphTransaction(graph) — TypeError in R2026
     1.2 - Rewrote core to use maxon Node Graph API
-    1.1 - Search native renderer Material ID parameter via description
+    1.1 - Tried GetDescription() search — does not reach node graph params
     1.0 - Initial release (User Data only)
 """
 
@@ -62,6 +76,9 @@ ID_ID_FIELD      = 1003
 ID_GROUP_BUTTONS = 1004
 ID_BTN_OK        = 1005
 ID_BTN_CANCEL    = 1006
+ID_GROUP_INFO    = 1007
+ID_INFO_TEXT     = 1008
+ID_BTN_HELP      = 1009
 
 
 # ---------------------------------------------------------------------------
@@ -211,18 +228,32 @@ class MaterialIDDialog(gui.GeDialog):
     def CreateLayout(self):
         self.SetTitle(PLUGIN_NAME)
 
+        # Info-Bereich
+        if self.GroupBegin(ID_GROUP_INFO, c4d.BFH_SCALEFIT, 1, 1, ""):
+            self.GroupBorderSpace(8, 6, 8, 2)
+            self.AddStaticText(ID_INFO_TEXT, c4d.BFH_SCALEFIT, name=
+                "① Materialien im Material Manager selektieren\n"
+                "② ID eingeben  ③ OK klicken"
+            )
+        self.GroupEnd()
+
+        self.AddSeparatorH(0, c4d.BFH_SCALEFIT)
+
+        # Eingabe
         if self.GroupBegin(ID_GROUP_MAIN, c4d.BFH_SCALEFIT | c4d.BFV_FIT, 2, 1, ""):
-            self.GroupBorderSpace(8, 8, 8, 8)
+            self.GroupBorderSpace(8, 6, 8, 4)
             self.AddStaticText(ID_LABEL, c4d.BFH_LEFT, name="Material ID:")
             self.AddEditNumberArrows(ID_ID_FIELD, c4d.BFH_SCALEFIT)
         self.GroupEnd()
 
         self.AddSeparatorH(0, c4d.BFH_SCALEFIT)
 
-        if self.GroupBegin(ID_GROUP_BUTTONS, c4d.BFH_SCALEFIT, 2, 1, ""):
+        # Buttons
+        if self.GroupBegin(ID_GROUP_BUTTONS, c4d.BFH_SCALEFIT, 3, 1, ""):
             self.GroupBorderSpace(8, 4, 8, 8)
             self.AddButton(ID_BTN_OK,     c4d.BFH_SCALEFIT, name="OK")
             self.AddButton(ID_BTN_CANCEL, c4d.BFH_SCALEFIT, name="Abbrechen")
+            self.AddButton(ID_BTN_HELP,   c4d.BFH_RIGHT,    name="?")
         self.GroupEnd()
 
         return True
@@ -255,6 +286,22 @@ class MaterialIDDialog(gui.GeDialog):
                     f"Material ID {entered_id} erfolgreich\n"
                     f"{total} Material(ien) zugewiesen."
                 )
+
+        elif id == ID_BTN_HELP:
+            gui.MessageDialog(
+                f"{PLUGIN_NAME}  v{PLUGIN_VERSION}\n"
+                "─────────────────────────────\n"
+                "Setzt die Material ID auf allen selektierten\n"
+                "Materialien im Material Manager.\n\n"
+                "Verwendung:\n"
+                "  1. Materialien im Material Manager selektieren\n"
+                "  2. Plugin aufrufen (Extensions-Menü)\n"
+                "  3. Gewünschte ID eingeben (0 – 99 999)\n"
+                "  4. OK klicken\n\n"
+                "Die ID wird direkt im Redshift Output-Node\n"
+                "unter OPTIONS › Material ID gesetzt.\n\n"
+                "Rückgängig: Ctrl+Z"
+            )
 
         elif id == ID_BTN_CANCEL:
             self.Close()

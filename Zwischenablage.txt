@@ -1,0 +1,137 @@
+Ich möchte, dass du ein Plugin für Cinema 4D entwickelst, das verschiedene Diamant-/Brillantschliffarten als parametrisierbares 3D-Objekt erzeugt.
+
+Sehr wichtig:
+Alle Schliffarten aus dem beigefügten Referenzbild müssen umgesetzt werden. Keine davon darf ausgelassen werden.
+
+Diese Typen müssen vollständig unterstützt werden:
+- Round
+- Cushion
+- Radiant
+- Princess
+- Asscher
+- Trilliant
+- Heart
+- Lozenge
+- Oval
+- Baguette
+- Emerald
+- Tapered Baguette
+- Pear
+- Marquise
+
+Ziel:
+- Erstelle ein parametrisches Cinema-4D-Objekt-Plugin.
+- Das Plugin soll für die oben genannten Diamantschliffe jeweils ein generiertes 3D-Mesh erzeugen.
+- Es soll ein echtes parametrisches Generator-Objekt sein, kein statischer Import.
+- Alle Einstellungen müssen dauerhaft editierbar bleiben.
+
+Recherche:
+- Nutze das Referenzbild als visuelle Grundlage.
+- Recherchiere zusätzlich im Internet die technischen Spezifikationen, typischen Proportionen, Facettenanzahlen und geometrischen Merkmale dieser Schliffarten.
+- Verwende möglichst seriöse Quellen aus Gemmologie, Diamantschliffen, Schmuckdesign oder fachlichen Referenzseiten.
+- Falls exakte Standards je nach Quelle variieren, dokumentiere das im Code und verwende sinnvolle Default-Werte.
+
+Wichtige geometrische Merkmale:
+Berücksichtige je nach Schliffart unter anderem:
+- Anzahl und Anordnung der Facetten
+- Table Size
+- Crown Height
+- Pavilion Depth
+- Girdle Thickness
+- Culet
+- Symmetrie
+- Length-to-Width Ratio
+- typische Konturform der Draufsicht
+- typische Silhouette und Kantencharakteristik
+
+Plugin-Verhalten:
+- Das Plugin soll ein Generator-Objekt sein.
+- Im Attribute Manager soll es ein Dropdown-Menü geben, in dem man den Schliff-Typ auswählt.
+- Je nach gewähltem Typ sollen die relevanten Parameter sichtbar oder aktiv werden.
+- Die Geometrie soll sich passend zum ausgewählten Schliff automatisch neu generieren.
+- Unterschiede zwischen den Schliffarten müssen klar erkennbar sein.
+- Das Mesh soll möglichst sauber, logisch aufgebaut und performant sein.
+
+Parameter:
+Bitte entwickle ein sinnvolles Parametersystem, z. B.:
+- Cut Type
+- Width
+- Length
+- Height
+- Diameter
+- Table Size
+- Crown Height
+- Pavilion Depth
+- Girdle Thickness
+- Culet Size
+- Length-to-Width Ratio
+- Facet Detail
+- Facet Accuracy
+- Symmetry
+- Corner Style
+- Girdle Shape
+- Culet On/Off
+- Rundiste scharf/weich/dick, falls sinnvoll
+- schliffspezifische Zusatzparameter, wo nötig
+
+Wichtig:
+- Nicht jeder Schliff braucht dieselben Parameter.
+- Zeige im UI nur die Parameter, die für den aktuell gewählten Schliff sinnvoll sind.
+- Definiere sinnvolle Default-Werte pro Schliffart.
+
+Technische Anforderungen:
+- Erstelle das Plugin vorzugsweise in Python für Cinema 4D.
+- Falls bestimmte Teile in C++ besser wären, erkläre das kurz, aber liefere zuerst eine möglichst robuste Python-Version.
+- Der Code soll sauber strukturiert und kommentiert sein.
+- Keine reine Pseudolösung, sondern ein realistisch umsetzbarer Plugin-Ansatz.
+- Trenne sauber zwischen:
+  - Plugin-/UI-Definition
+  - Parameterverwaltung
+  - schliffspezifischen Profilen
+  - Geometrie-Erzeugung
+  - Validierung
+
+Ausgabe:
+Bitte liefere:
+1. eine kurze technische Einschätzung
+2. eine Liste aller unterstützten Schliffarten mit ihren wichtigsten Eigenschaften
+3. eine sinnvolle Plugin-Architektur
+4. vollständigen Plugin-Code
+5. die nötigen Ressourcen-Dateien (.res / Strings / Description)
+6. Hinweise zur Plugin-ID
+7. Installationshinweise für Cinema 4D
+8. Hinweise, wie später weitere Schliffarten ergänzt werden können
+
+Qualitätsziel:
+- Alle Typen aus dem Referenzbild müssen umgesetzt werden.
+- Die Formen sollen nicht nur symbolisch sein, sondern sich an realistischen Proportionen orientieren.
+- Wo mathematisch oder technisch nötig, dürfen sinnvolle parametrische Näherungen verwendet werden, diese sollen aber klar dokumentiert werden.
+- Das Plugin soll für Produktvisualisierung, Schmuck-Rendering und Motion-Design nutzbar sein.
+
+Beginne bitte mit:
+1. technischer Einschätzung,
+2. recherchierter Liste aller 14 Schliffarten,
+3. Plugin-Architektur,
+4. anschließend dem vollständigen Code.
+
+Wichtig: Bitte beginne nicht sofort mit grobem Beispielcode. Analysiere zuerst die Schliffarten, definiere eine saubere Datenstruktur pro Schliffart und baue dann darauf den Generator auf.
+
+Wichtig für die Umsetzung:
+
+Bitte implementiere im ersten Schritt nur 2 Schliffarten vollständig funktionsfähig, damit das Plugin sauber und testbar aufgebaut werden kann. Ich möchte ausdrücklich eine schrittweise Entwicklung und keine übergroße Einmal-Lösung.
+
+Diese 2 Schliffarten sollen im ersten Schritt vollständig umgesetzt werden:
+- Round
+- Emerald
+
+Alle anderen Schliffarten aus der Referenz sollen noch nicht vollständig ausprogrammiert werden, aber bereits sauber für die spätere Erweiterung vorbereitet werden.
+
+Das bedeutet:
+- Die vollständige Plugin-Architektur soll schon auf alle Schliffarten ausgelegt sein.
+- Das Dropdown soll bereits so vorbereitet sein, dass weitere Typen leicht ergänzt werden können.
+- Die Dokumentation und Datenstruktur sollen alle geplanten Schliffarten bereits aufführen.
+- Für noch nicht implementierte Typen sollen klare Platzhalter, TODO-Kommentare und vorgedachte Parameterprofile vorhanden sein.
+- Bitte dokumentiere im Code genau, wie weitere Schliffarten später ergänzt werden sollen.
+
+Ziel:
+Ich möchte zuerst ein stabiles, sauberes Grundgerüst mit 2 funktionierenden Schliffarten und danach die restlichen Typen schrittweise ergänzen.
