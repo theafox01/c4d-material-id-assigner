@@ -7,52 +7,55 @@ Purpose:
     in the Material Manager.
 
     Strategy (in order of priority):
-    1. Searches the material's native description for a parameter named
-       "Material ID" (works for Redshift RS Standard, Arnold, etc.)
-    2. Falls back to a User Data field if no native parameter is found.
-
-Workflow:
-    1. Select one or more materials in the C4D Material Manager
-    2. Run the plugin via Extensions menu
-    3. Enter the desired ID number in the dialog
-    4. Confirm with OK — the ID is written to all selected materials
+    1. maxon Node Graph API  — sets the native port on the Output node
+       (Redshift RS Standard "OPTIONS > Material ID", R2024+ node materials)
+    2. Classic description search  — fallback for non-node materials
+    3. User Data  — last resort fallback
 
 Author:    theafox01
-Version:   1.1
-Requires:  Cinema 4D R2026 or later (Python 3)
+Version:   1.2
+Requires:  Cinema 4D R2026 + Redshift
 
-Plugin ID: 1060500
-    → Placeholder ID for development only.
-    → Register a real ID at: https://developers.maxon.net/
-    → Replace PLUGIN_ID before publishing/distributing.
+Plugin ID: 1060500  (PLACEHOLDER — register at developers.maxon.net)
 
 Changelog:
-    1.1 - Search native renderer Material ID parameter first (RS Standard etc.)
-          Fall back to User Data only if no native parameter found.
-          Fix: CommandPlugin → CommandData for R2026 compatibility.
-    1.0 - Initial release
+    1.2 - Rewrote core to use maxon Node Graph API for node-based materials
+          (Redshift RS Standard / Output node Material ID port)
+    1.1 - Search native renderer Material ID parameter via description
+    1.0 - Initial release (User Data only)
 """
 
 import c4d
-from c4d import gui, plugins
+from c4d import gui
+
+import maxon
 
 # ---------------------------------------------------------------------------
-# Plugin metadata
+# Config
 # ---------------------------------------------------------------------------
-PLUGIN_ID      = 1060500        # PLACEHOLDER — register at developers.maxon.net
+PLUGIN_ID      = 1060500
 PLUGIN_NAME    = "Material ID Assigner"
 PLUGIN_HELP    = "Assigns a numeric Material ID to all selected materials"
-PLUGIN_VERSION = "1.1"
+PLUGIN_VERSION = "1.2"
 
-# Fallback User Data field name (used when no native parameter is found)
+# Set to True to print all found nodes/ports to the C4D console (for debugging)
+DEBUG = False
+
+# Renderer graph space IDs to try (in order)
+RENDERER_SPACES = [
+    "com.redshift3d.redshift4c4d",   # Redshift
+    "com.autodesk.arnold.shader",    # Arnold
+    "net.maxon.render.0",            # C4D Standard / Physical
+]
+
+# Port name fragments to look for (case-insensitive substring match)
+MATID_PORT_FRAGMENTS = ["material_id", "materialid", "matid"]
+
+# Fallback User Data field name
 USERDATA_FIELD_NAME = "Material ID"
 
-# Exact parameter display names to search for (case-insensitive)
-# Add more names here if other renderers use different labels.
-NATIVE_PARAM_NAMES = ["material id"]
-
 # ---------------------------------------------------------------------------
-# Dialog widget IDs (must be unique within the dialog)
+# Dialog widget IDs
 # ---------------------------------------------------------------------------
 ID_GROUP_MAIN    = 1001
 ID_LABEL         = 1002
@@ -63,14 +66,130 @@ ID_BTN_CANCEL    = 1006
 
 
 # ---------------------------------------------------------------------------
-# Helper functions
+# Core: Node Graph API (maxon)
+# ---------------------------------------------------------------------------
+
+def try_set_via_node_graph(mat, value):
+    """
+    Searches the material's node graph for a port matching one of the
+    MATID_PORT_FRAGMENTS and sets its default value.
+
+    Returns True if the value was successfully set.
+    """
+    try:
+        nm = mat.GetNodeMaterialReference()
+        if not nm:
+            return False
+
+        for spaceStr in RENDERER_SPACES:
+            try:
+                graph = nm.GetGraph(maxon.Id(spaceStr))
+            except Exception:
+                continue
+
+            if graph.IsNullValue():
+                continue
+
+            if DEBUG:
+                print(f"[MatIDAssigner] Found graph: {spaceStr}")
+
+            found = [False]
+
+            with maxon.GraphTransaction(graph) as ta:
+
+                # Collect all nodes
+                nodes = []
+                graph.GetRoot().GetChildren(nodes, maxon.NODE_KIND.NODE)
+
+                for node in nodes:
+                    nodeIdStr = str(node.GetId()).lower()
+
+                    if DEBUG:
+                        print(f"[MatIDAssigner]   Node: {nodeIdStr}")
+
+                    # Collect all input ports of this node
+                    ports = []
+                    node.GetInputs().GetChildren(ports, maxon.NODE_KIND.PORT)
+
+                    for port in ports:
+                        portIdStr = str(port.GetId()).lower()
+
+                        if DEBUG:
+                            print(f"[MatIDAssigner]     Port: {portIdStr}")
+
+                        if any(frag in portIdStr for frag in MATID_PORT_FRAGMENTS):
+                            port.SetDefaultValue(maxon.Int32(value))
+                            found[0] = True
+                            if DEBUG:
+                                print(f"[MatIDAssigner] ✓ Set '{portIdStr}' = {value}")
+
+                ta.Commit()
+
+            if found[0]:
+                return True
+
+        return False
+
+    except Exception as e:
+        print(f"[MatIDAssigner] Node graph error: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Fallback: Classic description search
+# ---------------------------------------------------------------------------
+
+def try_set_via_description(mat, value):
+    """
+    Searches the material's classic C4D description for a parameter
+    named 'material id' and sets it. Works for non-node legacy materials.
+    """
+    try:
+        desc = mat.GetDescription(0)
+        for bc, paramid, groupid in desc:
+            if bc is None:
+                continue
+            name = bc.GetString(c4d.DESC_NAME)
+            if name and "material id" in name.strip().lower():
+                mat[paramid] = value
+                if DEBUG:
+                    print(f"[MatIDAssigner] ✓ Set via description: '{name}' = {value}")
+                return True
+    except Exception as e:
+        print(f"[MatIDAssigner] Description search error: {e}")
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Fallback: User Data
+# ---------------------------------------------------------------------------
+
+def set_via_userdata(mat, value):
+    """
+    Writes value to a 'Material ID' User Data field on the material.
+    Creates the field if it doesn't exist yet.
+    """
+    for uid, bc in mat.GetUserDataContainer():
+        if bc[c4d.DESC_NAME] == USERDATA_FIELD_NAME:
+            mat[uid] = value
+            return
+    # Create new field
+    bc = c4d.GetCustomDatatypeDefault(c4d.DTYPE_LONG)
+    bc[c4d.DESC_NAME]    = USERDATA_FIELD_NAME
+    bc[c4d.DESC_SHORT_NAME] = "Mat ID"
+    bc[c4d.DESC_MIN]     = 0
+    bc[c4d.DESC_MAX]     = 99999
+    bc[c4d.DESC_STEP]    = 1
+    bc[c4d.DESC_ANIMATE] = c4d.DESC_ANIMATE_OFF
+    uid = mat.AddUserData(bc)
+    mat[uid] = value
+
+
+# ---------------------------------------------------------------------------
+# Material selection
 # ---------------------------------------------------------------------------
 
 def get_selected_materials(doc):
-    """
-    Returns a list of all materials that are currently selected (active)
-    in the Material Manager of the given document.
-    """
     result = []
     mat = doc.GetFirstMaterial()
     while mat:
@@ -80,57 +199,14 @@ def get_selected_materials(doc):
     return result
 
 
-def set_native_material_id(mat, value):
-    """
-    Searches the material's description for a native 'Material ID' parameter
-    and sets it to value.
-
-    Works for Redshift RS Standard (OPTIONS > Material ID), Arnold, and any
-    other renderer that exposes a parameter with that display name.
-
-    Returns True if a native parameter was found and set, False otherwise.
-    """
-    try:
-        desc = mat.GetDescription(0)  # 0 = DESCFLAGS_DESC_NONE
-        for bc, paramid, groupid in desc:
-            if bc is None:
-                continue
-            name = bc.GetString(c4d.DESC_NAME)
-            if name and name.strip().lower() in NATIVE_PARAM_NAMES:
-                mat[paramid] = value
-                return True
-    except Exception as e:
-        print(f"[MaterialIDAssigner] Description search error: {e}")
-    return False
-
-
-def get_or_create_matid_userdata(mat):
-    """
-    Returns the DescID of the 'Material ID' User Data field on the material.
-    Creates the field (integer, 0–99999) if it does not exist yet.
-    Used as fallback when no native renderer parameter is found.
-    """
-    for uid, bc in mat.GetUserDataContainer():
-        if bc[c4d.DESC_NAME] == USERDATA_FIELD_NAME:
-            return uid
-
-    bc = c4d.GetCustomDatatypeDefault(c4d.DTYPE_LONG)
-    bc[c4d.DESC_NAME]       = USERDATA_FIELD_NAME
-    bc[c4d.DESC_SHORT_NAME] = "Mat ID"
-    bc[c4d.DESC_MIN]        = 0
-    bc[c4d.DESC_MAX]        = 99999
-    bc[c4d.DESC_STEP]       = 1
-    bc[c4d.DESC_ANIMATE]    = c4d.DESC_ANIMATE_OFF
-    return mat.AddUserData(bc)
-
+# ---------------------------------------------------------------------------
+# Main assignment logic
+# ---------------------------------------------------------------------------
 
 def assign_id_to_selected_materials(material_id):
     """
-    Assigns material_id to every selected material in the active document.
-    Tries native renderer parameter first, falls back to User Data.
-    The operation is fully undoable.
-
-    Returns (total, native, fallback) counts.
+    Assigns material_id to all selected materials using the best available method.
+    Returns (total, native_count, fallback_count).
     """
     doc = c4d.documents.GetActiveDocument()
     if not doc:
@@ -148,12 +224,20 @@ def assign_id_to_selected_materials(material_id):
     for mat in materials:
         doc.AddUndo(c4d.UNDOTYPE_CHANGE, mat)
 
-        if set_native_material_id(mat, material_id):
+        if DEBUG:
+            print(f"\n[MatIDAssigner] Processing: {mat.GetName()}")
+
+        # Priority 1: Node graph
+        if try_set_via_node_graph(mat, material_id):
             native_count += 1
+
+        # Priority 2: Classic description
+        elif try_set_via_description(mat, material_id):
+            native_count += 1
+
+        # Priority 3: User Data fallback
         else:
-            # Fallback: write to User Data
-            uid = get_or_create_matid_userdata(mat)
-            mat[uid] = material_id
+            set_via_userdata(mat, material_id)
             fallback_count += 1
 
         mat.Message(c4d.MSG_UPDATE)
@@ -169,29 +253,22 @@ def assign_id_to_selected_materials(material_id):
 # ---------------------------------------------------------------------------
 
 class MaterialIDDialog(gui.GeDialog):
-    """
-    Modal dialog that lets the user enter the numeric Material ID.
-    On OK the ID is applied to all currently selected materials.
-    """
 
     def __init__(self):
         super().__init__()
-        self._last_id = 0   # Remembers the last used ID within the session
+        self._last_id = 0
 
     def CreateLayout(self):
         self.SetTitle(PLUGIN_NAME)
 
-        # Row: label + number field
         if self.GroupBegin(ID_GROUP_MAIN, c4d.BFH_SCALEFIT | c4d.BFV_FIT, 2, 1, ""):
             self.GroupBorderSpace(8, 8, 8, 8)
             self.AddStaticText(ID_LABEL, c4d.BFH_LEFT, name="Material ID:")
             self.AddEditNumberArrows(ID_ID_FIELD, c4d.BFH_SCALEFIT)
         self.GroupEnd()
 
-        # Separator
         self.AddSeparatorH(0, c4d.BFH_SCALEFIT)
 
-        # Buttons row
         if self.GroupBegin(ID_GROUP_BUTTONS, c4d.BFH_SCALEFIT, 2, 1, ""):
             self.GroupBorderSpace(8, 4, 8, 8)
             self.AddButton(ID_BTN_OK,     c4d.BFH_SCALEFIT, name="OK")
@@ -206,13 +283,10 @@ class MaterialIDDialog(gui.GeDialog):
 
     def Command(self, id, msg):
         if id == ID_BTN_OK:
-            # Read the entered ID
             entered_id = self.GetInt32(ID_ID_FIELD)
             self._last_id = entered_id
 
-            # Apply
             total, native, fallback = assign_id_to_selected_materials(entered_id)
-
             self.Close()
 
             if total == 0:
@@ -220,18 +294,17 @@ class MaterialIDDialog(gui.GeDialog):
                     "Keine Materialien selektiert!\n\n"
                     "Bitte zuerst Materialien im Material Manager auswählen."
                 )
+            elif fallback > 0 and native == 0:
+                gui.MessageDialog(
+                    f"Material ID {entered_id} wurde gesetzt ({total} Material(ien)).\n\n"
+                    f"Hinweis: Kein nativer Parameter gefunden — ID als User Data gespeichert.\n"
+                    f"→ Aktiviere DEBUG=True im Plugin-Code für Details."
+                )
             else:
-                if fallback > 0:
-                    gui.MessageDialog(
-                        f"Material ID {entered_id} zugewiesen:\n"
-                        f"  • {native}x nativer Parameter (RS/Arnold etc.)\n"
-                        f"  • {fallback}x User Data (kein nativer Parameter gefunden)"
-                    )
-                else:
-                    gui.MessageDialog(
-                        f"Material ID {entered_id} wurde erfolgreich\n"
-                        f"{total} Material(ien) zugewiesen."
-                    )
+                gui.MessageDialog(
+                    f"Material ID {entered_id} erfolgreich\n"
+                    f"{total} Material(ien) zugewiesen. ✓"
+                )
 
         elif id == ID_BTN_CANCEL:
             self.Close()
@@ -240,21 +313,17 @@ class MaterialIDDialog(gui.GeDialog):
 
 
 # ---------------------------------------------------------------------------
-# Command Plugin
+# Plugin
 # ---------------------------------------------------------------------------
 
 class MaterialIDAssignerPlugin(c4d.plugins.CommandData):
-    """
-    Registered as a Cinema 4D Command Plugin.
-    Appears in the Extensions menu as "Material ID Assigner".
-    """
 
     def Execute(self, doc):
         dlg = MaterialIDDialog()
         dlg.Open(
             dlgtype=c4d.DLG_TYPE_MODAL,
             pluginid=PLUGIN_ID,
-            xpos=-2,    # -2 = center on screen
+            xpos=-2,
             ypos=-2,
             defaultw=280,
             defaulth=90,
@@ -262,7 +331,6 @@ class MaterialIDAssignerPlugin(c4d.plugins.CommandData):
         return True
 
     def GetState(self, doc):
-        # Plugin is always enabled (selection check happens inside the dialog)
         return c4d.CMD_ENABLED
 
 
@@ -271,7 +339,7 @@ class MaterialIDAssignerPlugin(c4d.plugins.CommandData):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    plugins.RegisterCommandPlugin(
+    c4d.plugins.RegisterCommandPlugin(
         id=PLUGIN_ID,
         str=PLUGIN_NAME,
         info=0,
