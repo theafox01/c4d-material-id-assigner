@@ -3,8 +3,13 @@ MaterialIDAssigner.pyp
 Cinema 4D Python Plugin
 
 Purpose:
-    Assigns a custom numeric "Material ID" (stored as User Data) to all
-    materials that are currently selected in the Material Manager.
+    Assigns a numeric Material ID to all materials currently selected
+    in the Material Manager.
+
+    Strategy (in order of priority):
+    1. Searches the material's native description for a parameter named
+       "Material ID" (works for Redshift RS Standard, Arnold, etc.)
+    2. Falls back to a User Data field if no native parameter is found.
 
 Workflow:
     1. Select one or more materials in the C4D Material Manager
@@ -13,13 +18,19 @@ Workflow:
     4. Confirm with OK — the ID is written to all selected materials
 
 Author:    theafox01
-Version:   1.0
-Requires:  Cinema 4D R21 or later (Python 3)
+Version:   1.1
+Requires:  Cinema 4D R2026 or later (Python 3)
 
 Plugin ID: 1060500
     → Placeholder ID for development only.
     → Register a real ID at: https://developers.maxon.net/
     → Replace PLUGIN_ID before publishing/distributing.
+
+Changelog:
+    1.1 - Search native renderer Material ID parameter first (RS Standard etc.)
+          Fall back to User Data only if no native parameter found.
+          Fix: CommandPlugin → CommandData for R2026 compatibility.
+    1.0 - Initial release
 """
 
 import c4d
@@ -28,13 +39,17 @@ from c4d import gui, plugins
 # ---------------------------------------------------------------------------
 # Plugin metadata
 # ---------------------------------------------------------------------------
-PLUGIN_ID   = 1060500           # PLACEHOLDER — register at developers.maxon.net
-PLUGIN_NAME = "Material ID Assigner"
-PLUGIN_HELP = "Assigns a numeric Material ID to all selected materials"
-PLUGIN_VERSION = "1.0"
+PLUGIN_ID      = 1060500        # PLACEHOLDER — register at developers.maxon.net
+PLUGIN_NAME    = "Material ID Assigner"
+PLUGIN_HELP    = "Assigns a numeric Material ID to all selected materials"
+PLUGIN_VERSION = "1.1"
 
-# Name of the User Data field that stores the ID on each material
+# Fallback User Data field name (used when no native parameter is found)
 USERDATA_FIELD_NAME = "Material ID"
+
+# Exact parameter display names to search for (case-insensitive)
+# Add more names here if other renderers use different labels.
+NATIVE_PARAM_NAMES = ["material id"]
 
 # ---------------------------------------------------------------------------
 # Dialog widget IDs (must be unique within the dialog)
@@ -55,8 +70,6 @@ def get_selected_materials(doc):
     """
     Returns a list of all materials that are currently selected (active)
     in the Material Manager of the given document.
-
-    Compatible with all Cinema 4D versions that support Python plugins.
     """
     result = []
     mat = doc.GetFirstMaterial()
@@ -67,19 +80,40 @@ def get_selected_materials(doc):
     return result
 
 
+def set_native_material_id(mat, value):
+    """
+    Searches the material's description for a native 'Material ID' parameter
+    and sets it to value.
+
+    Works for Redshift RS Standard (OPTIONS > Material ID), Arnold, and any
+    other renderer that exposes a parameter with that display name.
+
+    Returns True if a native parameter was found and set, False otherwise.
+    """
+    try:
+        desc = mat.GetDescription(0)  # 0 = DESCFLAGS_DESC_NONE
+        for bc, paramid, groupid in desc:
+            if bc is None:
+                continue
+            name = bc.GetString(c4d.DESC_NAME)
+            if name and name.strip().lower() in NATIVE_PARAM_NAMES:
+                mat[paramid] = value
+                return True
+    except Exception as e:
+        print(f"[MaterialIDAssigner] Description search error: {e}")
+    return False
+
+
 def get_or_create_matid_userdata(mat):
     """
-    Returns the DescID (UserData ID) of the 'Material ID' User Data field
-    on the given material. Creates the field if it does not exist yet.
-
-    The field is of type Long (integer), range 0–99999, not animatable.
+    Returns the DescID of the 'Material ID' User Data field on the material.
+    Creates the field (integer, 0–99999) if it does not exist yet.
+    Used as fallback when no native renderer parameter is found.
     """
-    # Search for an existing field with our name
     for uid, bc in mat.GetUserDataContainer():
         if bc[c4d.DESC_NAME] == USERDATA_FIELD_NAME:
             return uid
 
-    # Not found — create it
     bc = c4d.GetCustomDatatypeDefault(c4d.DTYPE_LONG)
     bc[c4d.DESC_NAME]       = USERDATA_FIELD_NAME
     bc[c4d.DESC_SHORT_NAME] = "Mat ID"
@@ -87,37 +121,47 @@ def get_or_create_matid_userdata(mat):
     bc[c4d.DESC_MAX]        = 99999
     bc[c4d.DESC_STEP]       = 1
     bc[c4d.DESC_ANIMATE]    = c4d.DESC_ANIMATE_OFF
-
     return mat.AddUserData(bc)
 
 
 def assign_id_to_selected_materials(material_id):
     """
-    Writes material_id into the 'Material ID' User Data field of every
-    selected material in the active document. The operation is undoable.
+    Assigns material_id to every selected material in the active document.
+    Tries native renderer parameter first, falls back to User Data.
+    The operation is fully undoable.
 
-    Returns the number of materials that were modified (0 if none selected).
+    Returns (total, native, fallback) counts.
     """
     doc = c4d.documents.GetActiveDocument()
     if not doc:
-        return 0
+        return 0, 0, 0
 
     materials = get_selected_materials(doc)
     if not materials:
-        return 0
+        return 0, 0, 0
 
     doc.StartUndo()
 
+    native_count   = 0
+    fallback_count = 0
+
     for mat in materials:
         doc.AddUndo(c4d.UNDOTYPE_CHANGE, mat)
-        uid = get_or_create_matid_userdata(mat)
-        mat[uid] = material_id
+
+        if set_native_material_id(mat, material_id):
+            native_count += 1
+        else:
+            # Fallback: write to User Data
+            uid = get_or_create_matid_userdata(mat)
+            mat[uid] = material_id
+            fallback_count += 1
+
         mat.Message(c4d.MSG_UPDATE)
 
     doc.EndUndo()
     c4d.EventAdd()
 
-    return len(materials)
+    return len(materials), native_count, fallback_count
 
 
 # ---------------------------------------------------------------------------
@@ -167,20 +211,27 @@ class MaterialIDDialog(gui.GeDialog):
             self._last_id = entered_id
 
             # Apply
-            count = assign_id_to_selected_materials(entered_id)
+            total, native, fallback = assign_id_to_selected_materials(entered_id)
 
             self.Close()
 
-            if count == 0:
+            if total == 0:
                 gui.MessageDialog(
                     "Keine Materialien selektiert!\n\n"
                     "Bitte zuerst Materialien im Material Manager auswählen."
                 )
             else:
-                gui.MessageDialog(
-                    f"Material ID {entered_id} wurde erfolgreich\n"
-                    f"{count} Material(ien) zugewiesen."
-                )
+                if fallback > 0:
+                    gui.MessageDialog(
+                        f"Material ID {entered_id} zugewiesen:\n"
+                        f"  • {native}x nativer Parameter (RS/Arnold etc.)\n"
+                        f"  • {fallback}x User Data (kein nativer Parameter gefunden)"
+                    )
+                else:
+                    gui.MessageDialog(
+                        f"Material ID {entered_id} wurde erfolgreich\n"
+                        f"{total} Material(ien) zugewiesen."
+                    )
 
         elif id == ID_BTN_CANCEL:
             self.Close()
