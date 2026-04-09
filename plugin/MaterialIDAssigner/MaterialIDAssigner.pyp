@@ -88,27 +88,38 @@ def set_rs_material_id(mat, value):
         if graph.IsNullValue():
             return False
 
-        # Find the output.materialid port (read-only traversal, no transaction)
+        # Find port first (read-only traversal)
+        target_port = None
         nodes = []
         graph.GetViewRoot().GetChildren(nodes, maxon.NODE_KIND.NODE)
 
         for node in nodes:
             ports = []
             node.GetInputs().GetChildren(ports, maxon.NODE_KIND.INPORT)
-
             for port in ports:
                 if str(port.GetId()) == RS_PORT_ID:
-                    # Convert node port → classic C4D DescID → set via mat[]
-                    # Signature: GetDescIDForNodePort(spaceId, node, port)
-                    desc_id = nm.GetDescIDForNodePort(maxon.Id(RS_SPACE_ID), node, port)
-                    if desc_id is not None:
-                        mat[desc_id] = value
-                        return True
+                    target_port = port
+                    break
+            if target_port:
+                break
 
-        return False
+        if target_port is None:
+            print("[MatIDAssigner] Port nicht gefunden")
+            return False
+
+        # Set value via transaction
+        # NOTE: do NOT call ta.Commit() inside the with-block —
+        # the context manager commits automatically on clean exit.
+        # Calling it manually caused the crash in v1.3.
+        with maxon.GraphTransaction(graph) as ta:
+            target_port.SetDefaultValue(int(value))
+
+        return True
 
     except Exception as e:
-        print(f"[MatIDAssigner] Error: {e}")
+        import traceback
+        print(f"[MatIDAssigner] Error type={type(e).__name__!r} msg={e!r}")
+        traceback.print_exc()
         return False
 
 
