@@ -27,6 +27,8 @@ Changelog:
           Port:   com.redshift3d.redshift4c4d.node.output.materialid
           Fixed:  GetRoot() → GetViewRoot() (deprecated since 2025.0)
           Fixed:  NODE_KIND.PORT → NODE_KIND.INPORT
+          Fixed:  SetDefaultValue() in GraphTransaction caused crash
+                  → now uses GetDescIDForNodePort() + mat[descId] (crash-safe)
     1.2 - Rewrote core to use maxon Node Graph API
     1.1 - Search native renderer Material ID parameter via description
     1.0 - Initial release (User Data only)
@@ -71,6 +73,10 @@ def set_rs_material_id(mat, value):
     Sets the Material ID on the Redshift Output node of a node-based material.
     Port: com.redshift3d.redshift4c4d.node.output.materialid
 
+    Uses GetDescIDForNodePort() to convert the node port to a classic C4D
+    DescID, then sets the value via mat[descId] — no graph transaction needed,
+    crash-safe.
+
     Returns True on success, False if the material has no Redshift node graph.
     """
     try:
@@ -82,28 +88,23 @@ def set_rs_material_id(mat, value):
         if graph.IsNullValue():
             return False
 
-        found = [False]
+        # Find the output.materialid port (read-only traversal, no transaction)
+        nodes = []
+        graph.GetViewRoot().GetChildren(nodes, maxon.NODE_KIND.NODE)
 
-        with maxon.GraphTransaction(graph) as ta:
-            nodes = []
-            graph.GetViewRoot().GetChildren(nodes, maxon.NODE_KIND.NODE)
+        for node in nodes:
+            ports = []
+            node.GetInputs().GetChildren(ports, maxon.NODE_KIND.INPORT)
 
-            for node in nodes:
-                ports = []
-                node.GetInputs().GetChildren(ports, maxon.NODE_KIND.INPORT)
+            for port in ports:
+                if str(port.GetId()) == RS_PORT_ID:
+                    # Convert node port → classic C4D DescID → set via mat[]
+                    desc_id = nm.GetDescIDForNodePort(port)
+                    if desc_id is not None:
+                        mat[desc_id] = value
+                        return True
 
-                for port in ports:
-                    if str(port.GetId()) == RS_PORT_ID:
-                        port.SetDefaultValue(maxon.Int32(value))
-                        found[0] = True
-                        break
-
-                if found[0]:
-                    break
-
-            ta.Commit()
-
-        return found[0]
+        return False
 
     except Exception as e:
         print(f"[MatIDAssigner] Error: {e}")
