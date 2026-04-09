@@ -192,7 +192,7 @@ class MaterialIDDialog(gui.GeDialog):
 # Command Plugin
 # ---------------------------------------------------------------------------
 
-class MaterialIDAssignerPlugin(plugins.CommandPlugin):
+class MaterialIDAssignerPlugin(c4d.plugins.CommandData):
     """
     Registered as a Cinema 4D Command Plugin.
     Appears in the Extensions menu as "Material ID Assigner".
