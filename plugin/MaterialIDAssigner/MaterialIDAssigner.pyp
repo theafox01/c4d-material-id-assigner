@@ -99,7 +99,8 @@ def set_rs_material_id(mat, value):
             for port in ports:
                 if str(port.GetId()) == RS_PORT_ID:
                     # Convert node port → classic C4D DescID → set via mat[]
-                    desc_id = nm.GetDescIDForNodePort(port)
+                    # GetDescIDForNodePort requires both the port and its parent node
+                    desc_id = nm.GetDescIDForNodePort(port, node)
                     if desc_id is not None:
                         mat[desc_id] = value
                         return True
