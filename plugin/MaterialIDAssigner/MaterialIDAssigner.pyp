@@ -107,12 +107,12 @@ def set_rs_material_id(mat, value):
             print("[MatIDAssigner] Port nicht gefunden")
             return False
 
-        # Set value via transaction
-        # NOTE: do NOT call ta.Commit() inside the with-block —
-        # the context manager commits automatically on clean exit.
-        # Calling it manually caused the crash in v1.3.
-        with maxon.GraphTransaction(graph) as ta:
+        # Set value via graph transaction
+        # Use graph.BeginTransaction() — NOT maxon.GraphTransaction(graph)
+        # which fails in R2026 with a type copy error.
+        with graph.BeginTransaction() as ta:
             target_port.SetDefaultValue(int(value))
+            ta.Commit()
 
         return True
 
